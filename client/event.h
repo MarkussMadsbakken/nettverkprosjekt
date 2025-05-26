@@ -127,7 +127,7 @@ public:
 };
 }
 
-// Interpolated events are meant for continous actions
+// Interpolated events are meant for continuous actions
 namespace Events::Interpolated {
     class ClientSidePredictToken {
     public:
