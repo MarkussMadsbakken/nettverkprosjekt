@@ -11,7 +11,7 @@ using json = nlohmann::json;
 
 class NetServer{
 public:
-    NetServer(boost::asio::io_context &io_context, int port): socket(io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v6(), port)), connectionManager(10){
+    NetServer(boost::asio::io_context &io_context, int port): socket(io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v6(), port)), connectionManager(10), cleanup_timer(socket.get_executor(), std::chrono::seconds(20)){
 
         // create the event processor
         eventProcessor = std::make_unique<EventProcessor>([this](const Packet &packet){
@@ -19,6 +19,8 @@ public:
         });
 
         setup_internal_events();
+
+        schedule_cleanup();
     }
 
     template <typename T, typename = std::enable_if_t<std::is_base_of_v<IServerEvent, std::decay_t<T>>>>
@@ -80,6 +82,7 @@ private:
     boost::asio::ip::udp::socket socket;
     std::unordered_map<std::string, std::shared_ptr<IServerEvent>> events;
     std::unordered_map<std::string, std::function<void(boost::asio::ip::udp::endpoint, json)>> internal_events;
+    boost::asio::steady_timer cleanup_timer;
 
     static constexpr size_t max_udp_message_size = 0xffff - 20 - 8; // 16 bit UDP length field - 20 byte IP header - 8 byte UDP header
 
@@ -129,6 +132,16 @@ private:
 
             std::string res = Packet("!connect", responseContent).package_to_request();
             socket.send_to(boost::asio::buffer(res, res.length()), endpoint);
+        });
+    }
+
+    void schedule_cleanup() {
+        cleanup_timer.async_wait([this](const boost::system::error_code &ec) {
+            if (!ec) {
+                connectionManager.cleanup_expired_connections();
+                cleanup_timer.expires_after(std::chrono::seconds(20));
+                schedule_cleanup();
+            }
         });
     }
 };
