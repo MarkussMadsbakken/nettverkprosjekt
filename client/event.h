@@ -1,14 +1,14 @@
 #ifndef NETTVERKPROSJEKT_EVENT_H
 #define NETTVERKPROSJEKT_EVENT_H
 
-#include "../models/packet.cpp"
+#include "../models/packet.h"
 #include <functional>
 #include <iostream>
 #include <boost/circular_buffer.hpp>
 #include <SFML/System/Vector2.hpp>
 #include <nlohmann/json.hpp>
 #include <queue>
-#include "interpolation.cpp"
+#include "interpolation.h"
 
 
 class IEvent{

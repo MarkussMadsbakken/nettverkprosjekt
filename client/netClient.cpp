@@ -2,7 +2,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <nlohmann/json.hpp>
-#include "../models/packet.cpp"
+#include "../models/packet.h"
 #include "eventPool.h"
 #include "event.h"
 

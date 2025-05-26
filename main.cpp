@@ -7,6 +7,9 @@
 
 using json = nlohmann::json;
 
+// an example player class.
+// the player movement is predicted, whereas the other player movement is interpreted
+// the is_player_1 controls both the color of the player, and whether movement should be validated before it is sent
 class ExamplePlayer{
 public:
     ExamplePlayer(NetClient &client, bool is_player_1, const bool &game_is_paused): is_player_1(is_player_1), game_is_paused(game_is_paused){
@@ -16,14 +19,17 @@ public:
         other_client_move = client.add_event(other_event_name, Events::Interpolated::Vector2f(Events::Interpolated::Interpolate));
     }
 
+    // gets the event values. .first is its own movement, .second is the other players interpreted movement
     std::pair<sf::Vector2f, sf::Vector2f> get_event_values(){
         return {this_client_move->get_current_value(), other_client_move->get_current_value()};
     }
 
+    // pushes a move event
     void push_move(const sf::Vector2f value){
         this_client_move->send(value);
     }
 
+    // handle player 1 movement (no validation)
     void handle_player_1_move(float x, float y){
         // do no valiation
 
@@ -33,6 +39,7 @@ public:
         push_move(value);
     }
 
+    // handle player 2 movement (validation).
     void handle_player_2_move(float x, float y){
         if(game_is_paused){
             return;
@@ -50,6 +57,7 @@ public:
         push_move(value);
     }
 
+    // handles key presses
     void handle_keypress(){
         if(is_player_1) {
             if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Left)) {
@@ -96,74 +104,64 @@ public:
 
 
 int main() {
+    // create an event loop
     boost::asio::io_context event_loop(1);
+
+    // initialize the server
     NetServer server(event_loop, 3000);
 
+    // example server variables
     bool game_is_paused = false;
     sf::Vector2f red_pos_server(0, 0);
     sf::Vector2f blue_pos_server(0, 0);
 
-    server.add_event("redmove", [&server, &game_is_paused, &red_pos_server](const json &message, const NetServer::server_response_actions &actions){
+    // a generic handle move function
+    auto handle_move = [](const sf::Vector2f &data, const server_response_actions<sf::Vector2f> &actions, bool &game_is_paused, sf::Vector2f &last_pos){
         auto [accept, reject] = actions;
 
         if(game_is_paused){
-            json new_message = {
-                    {"x", red_pos_server.x},
-                    {"y", red_pos_server.y}
-            };
-            red_pos_server = sf::Vector2f(new_message["x"].template get<float>(), new_message["y"].template get<float>());
-            reject(new_message);
+            reject(last_pos);
             return;
         }
 
-        if(message["x"].template get<float>() > 300){
-            json new_message = message;
-            new_message["x"] = 300;
-            reject(new_message);
-            red_pos_server = sf::Vector2f(new_message["x"].template get<float>(), new_message["y"].template get<float>());
+        if(data.x> 300){
+            sf::Vector2f new_data = data;
+            new_data.x = 300;
+            reject(new_data);
+            last_pos = new_data;
             return;
         }
 
 
-        red_pos_server = sf::Vector2f(message["x"].template get<float>(), message["y"].template get<float>());
-        accept(message);
-    });
+        last_pos = data;
+        accept(data);
+    };
 
-    server.add_event("bluemove", [&server, &game_is_paused, &blue_pos_server](const json &message, const NetServer::server_response_actions &actions){
-        auto [accept, reject] = actions;
-        if(game_is_paused){
-            json new_message = {
-                {"x", blue_pos_server.x},
-                {"y", blue_pos_server.y}
-            };
-            blue_pos_server = sf::Vector2f(new_message["x"].template get<float>(), new_message["y"].template get<float>());
-            reject(new_message);
-            return;
-        }
+    // add an event for when the red player moves
+    server.add_event("redmove", ServerEvents::Vector2f([&game_is_paused, &red_pos_server, &handle_move](const sf::Vector2f &data, const server_response_actions<sf::Vector2f> &actions){
+        handle_move(data, actions, game_is_paused, red_pos_server);
+    }));
 
-        if(message["x"].template get<float>() > 300){
-            json new_message = message;
-            new_message["x"] = 300;
-            reject(new_message);
-            blue_pos_server = sf::Vector2f(new_message["x"].template get<float>(), new_message["y"].template get<float>());
-            return;
-        }
+    // add an event for the blue player movement
+    server.add_event("bluemove",    ServerEvents::Vector2f([&game_is_paused, &blue_pos_server, &handle_move](const sf::Vector2f &data, const server_response_actions<sf::Vector2f> &actions){
+        handle_move(data, actions, game_is_paused, blue_pos_server);
+    }));
 
-        blue_pos_server = sf::Vector2f(message["x"].template get<float>(), message["y"].template get<float>());
-        accept(message);
-    });
-
+    // start the server
     boost::asio::co_spawn(event_loop, server.start(), boost::asio::detached);
 
+    // create and start two clients
     NetClient client(event_loop, "localhost", 3000);
     boost::asio::co_spawn(event_loop, client.start(), boost::asio::detached);
 
     NetClient client2(event_loop, "localhost", 3000);
     boost::asio::co_spawn(event_loop, client2.start(), boost::asio::detached);
 
+    // Create two example players
     ExamplePlayer blue_player(client, true, game_is_paused);
     ExamplePlayer red_player(client2, false, game_is_paused);
 
+    // Setup SFML
     sf::RenderWindow window(sf::VideoMode({800, 600}), "My window");
     window.setFramerateLimit(60);
 
@@ -203,12 +201,12 @@ int main() {
     right_wall.setFillColor(sf::Color::Black);
     right_wall.setPosition({350, 0});
 
-    std::thread eventLoopThread([&event_loop]() {
+    // Run the client on a separate worker thread, to allow SFML to start.
+    std::thread event_loop_thread([&event_loop]() {
         event_loop.run();
     });
 
     int pause_cooldown = 0;
-
 
     while (window.isOpen()) {
         while (const std::optional event = window.pollEvent()){
@@ -232,16 +230,19 @@ int main() {
             }
         }
 
+        // handle player 1 keypress and updated values
         blue_player.handle_keypress();
         auto blue_player_values = blue_player.get_event_values();
         blue_rect.setPosition(blue_player_values.first);
         red_est_rect.setPosition(blue_player_values.second);
 
+        // handle player 2 keypress and updated values
         red_player.handle_keypress();
         auto red_player_values = red_player.get_event_values();
         red_rect.setPosition(red_player_values.first);
         blue_est_rect.setPosition(red_player_values.second);
 
+        // draw everything to the screen
         window.clear(sf::Color::White);
         ping_text.setString("client 1 ping: " + std::to_string(client.get_ping()) + "ms");
         ping_text_2.setString("client 2 ping: " + std::to_string(client2.get_ping()) + "ms");
@@ -256,6 +257,7 @@ int main() {
         window.draw(blue_est_rect);
         window.draw(right_wall);
 
+        // draw a pause message if the game is paused
         if(game_is_paused){
             window.draw(pause_text);
         }
@@ -263,8 +265,9 @@ int main() {
         window.display();
     }
 
+    // Stop the event loop after the window is closed, and join the worker thread
     event_loop.stop();
-    if (eventLoopThread.joinable()) {
-        eventLoopThread.join();
+    if (event_loop_thread.joinable()) {
+        event_loop_thread.join();
     }
 }

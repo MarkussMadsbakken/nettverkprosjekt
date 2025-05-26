@@ -3,7 +3,7 @@
 
 #include <nlohmann/json.hpp>
 #include <any>
-#include "error.cpp"
+#include "error.h"
 
 using json = nlohmann::json;
 

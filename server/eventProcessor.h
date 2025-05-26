@@ -1,7 +1,7 @@
 #ifndef NETTVERKPROSJEKT_EVENTPROCESSOR_H
 #define NETTVERKPROSJEKT_EVENTPROCESSOR_H
 
-#include "../models/packet.cpp"
+#include "../models/packet.h"
 #include <vector>
 #include <mutex>
 #include <boost/asio.hpp>

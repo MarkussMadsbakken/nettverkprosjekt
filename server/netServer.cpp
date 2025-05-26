@@ -2,20 +2,15 @@
 #include <boost/asio.hpp>
 #include <iostream>
 #include <nlohmann/json.hpp>
-#include "../models/packet.cpp"
-#include "connectionManager.cpp"
-#include "eventProcessor.cpp"
-
+#include "../models/packet.h"
+#include "connectionManager.h"
+#include "eventProcessor.h"
+#include "serverEvent.h"
 
 using json = nlohmann::json;
 
 class NetServer{
 public:
-    struct server_response_actions{
-        std::function<void(const json &response)> accept;
-        std::function<void(const json &response)> reject;
-    };
-
     NetServer(boost::asio::io_context &io_context, int port): socket(io_context, boost::asio::ip::udp::endpoint(boost::asio::ip::udp::v6(), port)), connectionManager(10){
 
         // create the event processor
@@ -26,8 +21,15 @@ public:
         setup_internal_events();
     }
 
-    void add_event(const std::string &command, const std::function<void(const json &data, const server_response_actions &actions)> &function) {
-        events.insert({command, function});
+    template <typename T, typename = std::enable_if_t<std::is_base_of_v<IServerEvent, std::decay_t<T>>>>
+    std::shared_ptr<T> add_event(const std::string &command, T&& event) {
+        auto event_pointer = std::make_shared<std::decay_t<T>>(std::forward<T>(event));
+        event_pointer->set_broadcast_fn([this](const Packet &packet){
+           this->broadcast(packet);
+        });
+
+        events.insert({command, event_pointer});
+        return event_pointer;
     }
 
     boost::asio::awaitable<void> handle_request(const boost::asio::ip::udp::endpoint &endpoint, const std::string &message) {
@@ -76,7 +78,7 @@ private:
     ConnectionManager connectionManager;
     std::unique_ptr<EventProcessor> eventProcessor;
     boost::asio::ip::udp::socket socket;
-    std::unordered_map<std::string, std::function<void(const json &data, const server_response_actions &actions)>> events;
+    std::unordered_map<std::string, std::shared_ptr<IServerEvent>> events;
     std::unordered_map<std::string, std::function<void(boost::asio::ip::udp::endpoint, json)>> internal_events;
 
     static constexpr size_t max_udp_message_size = 0xffff - 20 - 8; // 16 bit UDP length field - 20 byte IP header - 8 byte UDP header
@@ -84,18 +86,7 @@ private:
     void trigger_event(const Packet &packet) {
         auto it = events.find(packet.event);
         if (it != events.end()) {
-            server_response_actions actions{
-                [this, &packet](const json &content){
-                    // accept by sending the same packet id
-                    this->broadcast(Packet(packet.event, content, packet.packet_id));
-                },
-                [this, &packet](const json &content){
-                    // reject by sending a packet_id of -1
-                    this->broadcast(Packet(packet.event, content, -1));
-                },
-            };
-
-            it->second(packet.content, actions);
+            it->second->receive_event(packet);
         } else {
             std::cerr << "No event found for command: " << packet.event << std::endl;
         }
