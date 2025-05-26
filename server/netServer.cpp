@@ -39,8 +39,6 @@ public:
 
         Packet packet(message);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-
         if(packet.event.starts_with('!')){
             trigger_internal_event(endpoint, packet);
             co_return void();

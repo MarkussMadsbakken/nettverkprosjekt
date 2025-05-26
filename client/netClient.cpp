@@ -18,7 +18,8 @@ public:
 
     NetClient(boost::asio::io_context &io_context, const std::string &server_address, int server_port)
             : socket(io_context),
-              ping_timer(io_context) {
+            artificial_delay(0),
+            ping_timer(io_context) {
 
         // setup endpoint
         boost::asio::ip::udp::resolver resolver(io_context);
@@ -46,11 +47,22 @@ public:
         });
 
         // setup event pool
-        // TODO: this should really not be sent synchronously, but to fix it i would need to do a big refactoring
         eventPool.add_pool_listener([this](const Packet &packet){
-            std::string message = packet.package_to_request();
-            this->socket.send_to(boost::asio::buffer(message, message.length()), server_endpoint);
+            boost::asio::co_spawn(socket.get_executor(),[this, packet]() -> boost::asio::awaitable<void> {
+              std::string message = packet.package_to_request();
+
+              boost::asio::steady_timer delay_timer(socket.get_executor(), this->artificial_delay);
+              co_await delay_timer.async_wait(boost::asio::use_awaitable);
+
+              socket.send_to(boost::asio::buffer(message, message.length()), server_endpoint);
+              co_return;
+          },
+          boost::asio::detached);
         });
+    }
+
+    void set_artificial_delay(const std::chrono::milliseconds &delay){
+        artificial_delay = delay;
     }
 
     // adds a new event to the client, in the form of a json callback
@@ -87,6 +99,8 @@ public:
         Packet packet(command, content);
         std::string message = packet.package_to_request();
 
+        std::this_thread::sleep_for(artificial_delay);
+
         co_await socket.async_send_to(boost::asio::buffer(message, message.length()), server_endpoint, boost::asio::use_awaitable);
     }
 
@@ -98,6 +112,21 @@ public:
     // sends event + content to the server
     void send(const std::string &command, const json &content){
         eventPool.pool({command, content});
+    }
+
+    boost::asio::awaitable<void> handle_event(const std::string &message){
+        Packet packet(message);
+
+        boost::asio::steady_timer delay_timer(socket.get_executor(), this->artificial_delay);
+        co_await delay_timer.async_wait(boost::asio::use_awaitable);
+
+        if (packet.event.starts_with('!')) {
+            trigger_internal_event(packet);
+            co_return;
+        }
+
+        trigger_event(packet);
+        co_return;
     }
 
     // starts the client
@@ -113,19 +142,10 @@ public:
             char buffer[max_udp_message_size];
             udp::endpoint sender_endpoint;
             auto bytes_transferred = co_await socket.async_receive_from(boost::asio::buffer(buffer, max_udp_message_size), sender_endpoint, boost::asio::use_awaitable);
-
             std::string message(buffer, bytes_transferred);
-
             // std::cout << "Client: recieved message " + message << std::endl;
 
-            Packet packet(message);
-
-            if (packet.event.starts_with('!')) {
-                trigger_internal_event(packet);
-                continue;
-            }
-
-            trigger_event(Packet(message));
+            co_spawn(socket.get_executor(), handle_event(message), boost::asio::detached);
         }
     }
 
@@ -154,6 +174,7 @@ private:
     std::unordered_map<std::string, std::shared_ptr<IEvent>> events;
     std::unordered_map<std::string, std::function<void(const json &)>> internal_events;
 
+    std::chrono::milliseconds artificial_delay;
     int ping;
     float server_tick_rate;
     std::vector<std::function<void(ping_update)>> ping_update_listeners;

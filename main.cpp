@@ -152,9 +152,11 @@ int main() {
 
     // create and start two clients
     NetClient client(event_loop, "localhost", 3000);
+    client.set_artificial_delay(std::chrono::milliseconds(20)); // set artificial ping
     boost::asio::co_spawn(event_loop, client.start(), boost::asio::detached);
 
     NetClient client2(event_loop, "localhost", 3000);
+    client2.set_artificial_delay(std::chrono::milliseconds(250)); // set artificial ping
     boost::asio::co_spawn(event_loop, client2.start(), boost::asio::detached);
 
     // Create two example players
