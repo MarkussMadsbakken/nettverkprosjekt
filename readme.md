@@ -3,6 +3,8 @@
 Dette prosjektet laget for IDATT2104 er et netcode-bibliotek, skrevet i c++ 23.
 Biblioteket tar utgangspunkt i UDP-protokollen, og lar en utvikler sette opp både server og klient, begge basert på en hendelsesbasert modell.
 
+Prosjektet er utviklet av Markus Stuevold Madsbakken alene.
+
 ## Implementert funksjonalitet
 ### Hendelsesbasert kommunikasjon
 All data som sendes frem og tilbake, er hendelser, definert med en unik event-id.
@@ -29,11 +31,12 @@ Prosjektet er laget med CMake, så installasjon burde gå ganske lett.
 Allikevel er det et par ting som må gjøres.
 
 ### Avhengigheter
-| Navn  | Beskrivelse                              | Minimumversjon |
-|-------|------------------------------------------|----------------|
-| CMake | Bygger prosjektet                        | 3.26           |
-| SFML  | Grafikkbibliotek                         | 3.0.0          |
-| Boost | Nettverksfunksjoner og diverse utilities | 1.88.0         |
+| Navn          | Beskrivelse                                          | Minimumversjon |
+|---------------|------------------------------------------------------|----------------|
+| CMake         | Bygger prosjektet                                    | 3.26           |
+| SFML          | Grafikkbibliotek                                     | 3.0.0          |
+| Boost         | Nettverksfunksjoner og diverse utilities             | 1.88.0         |
+| nlohmman/json | JSON parsing frem og tilbake mellom server og klient | 3.12.0         |
 
 ### Installasjonsintruks
 1. Last ned SFML fra https://www.sfml-dev.org/download/, og legg ved i en ny undermappe mappe "SFML".
