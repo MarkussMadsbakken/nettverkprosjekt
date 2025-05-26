@@ -1,10 +1,49 @@
-## Nettverksprosjekt
+# Nettverksprosjekt
+## Introduksjon
+Dette prosjektet laget for IDATT2104 er et netcode-bibliotek, skrevet i c++ 23.
+Biblioteket tar utgangspunkt i UDP-protokollen, og lar en utvikler sette opp både server og klient, begge basert på en hendelsesbasert modell.
 
+## Implementert funksjonalitet
+### Hendelsesbasert kommunikasjon
+All data som sendes frem og tilbake, er hendelser, definert med en unik event-id.
+Tilkoblingen mellom klient og tjener er tilstandsløs, og alle hendelser blir prosessert likt.
+Det er derfor opp til en utvikler selv å definere server-tilstanden.
+Alle klienter må derimot sende en oppkoblingsmelding og en ping hvert tiende sekund, for å kunne bli tilsendt hendelser.
 
+Hendelser blir prosessert noen ganger i sekundet, etter en såkalt tick-rate. 
+Om serveren har mye å prosessere, altså at tick_rate går ned, sender klienter automatisk mindre data.
+
+### Interpolation/Reconciliation
+Når klienten sender en melding til serveren, kan man enten velge å anta att oppdatering gikk gjennom, eller så kan an animere endringen i etterkant.
+
+#### Reconciliation
+Om man legger ved en hendelse, så gjøres det automatisk prediksjon med reconciliation.
+Klienten antar at hendelsen blir akseptert av serveren, og den nye tilstanden blir umiddeltbart tilgjengelig.
+Om serveren velger å forkaste hendelsen (mer om dette lenger ned), bytter klienten ut sin interne tilstand, med en som serveren har godkjent
+
+#### Interpolation
+Man kan velge å, istedenfor anta at hendelsen gikk gjennom, å istedenfor animere endringen mellom ulike tilstander fått av serveren.
+
+## Installasjon
+Prosjektet er laget med CMake, så installasjon burde gå ganske lett.
+Allikevel er det et par ting som må gjøres.
+
+### Avhengigheter
+| Navn  | Beskrivelse                              | Minimumversjon |
+|-------|------------------------------------------|----------------|
+| CMake | Bygger prosjektet                        | 3.26           |
+| SFML  | Grafikkbibliotek                         | 3.0.0          |
+| Boost | Nettverksfunksjoner og diverse utilities | 1.88.0         |
+
+### Installasjonsintruks
+1. Last ned SFML fra https://www.sfml-dev.org/download/, og legg ved i en ny undermappe mappe "SFML".
+2. Installer BOOST fra https://www.boost.org/releases/latest/, eller via en package manager.
+3. Installer nlohmann/json via en package manager. Se https://github.com/nlohmann/json for mer informasjon.
+4. Last ned Inter fra https://fonts.google.com/specimen/Inter. Hent font-filen (inter.ttf), og legg den i cmake-build-debug mappen (eller hvor du kjører prosjektet).
 
 ## Bruk
 ### Klient
-En nettverksklient kan opprettes slik
+En nettverksklient kan opprettes slik:
 
 ```c++
 #include "client/netClient.cpp"
@@ -33,6 +72,8 @@ Nettverksbiblioteket er avhengig av hendelser, så for at noe skal skje må dett
 NetClient client(...init);
 auto event = client.add_event("eksempel", Events::Json());
 ```
+
+> **OBS!** Alle hendelser må tilsvare en *ny* tilstand. Relative tilstander som "flytt deg 5 skritt til høyre", fungerer ikke, og vil bli overskrevet
 
 #### Motta hendelser
 Når en hendelse er lagt til, mottar hendelsen automatisk ny data:
@@ -94,9 +135,8 @@ struct min_hendelse{
 }
 
 
-class Json: public Event<min_hendelse>{
+class MinHendelse: public Event<min_hendelse>{
 public:
-    
     // hvordan oversetter man til json?
     Packet serialize(const sf::min_hendelse &hendelse) override {
         nlohmann::json data{
@@ -114,6 +154,11 @@ public:
     }
 };
 }
+```
+
+Denne nye hendelsen kan da brukes som alle andre hendelser:
+```c++
+auto min_hendelse = client.add_event("hendelse", MinHendelse());
 ```
 
 #### Predikerte hendelser
@@ -158,22 +203,57 @@ Serveren mottar hendelser på litt annen måte enn klienten. Hendelelseshåndter
 Alle server-hendelser burde oppdatere alle klienter, og det betyr at serveren har kontroll over hva slags respons som skal sendes tilbake til klienter, via to funksjoner; accept og reject.
 
 ```c++
-server.add_event("move", [](const json &message, const NetServer::server_response_actions &actions){
+server.add_event("move", ServerEvents::Vector2f([](const sf::Vector2f &data, const server_response_actions<sf::Vector2f> &actions){
     auto [accept, reject] = actions;
     
     accept(message); //Hendelsen er godkjent/riktig
     reject(message); //Hendelsen er ikke godkjent
-}
+}));
 ```
 - Accept: Signaliserer til alle klienter at en klient har sendt en hendelse som er blitt godkjent av server. Klienter fortsetter som vanlig med prediksjon.
 - Reject: Hendelsen er ikke blitt godkjent, og vedlagt ligger den siste "korrekte" server-tilstanden. Alle klienter bruker denne nye tilstanden, inkludert klienten som sendte hendelsen.
 
+På lik måte som for klienthendelser, finnes det er par egendefinerte hendelser i biblioteket, Json og Vector2f.
+For å lage nye hendelser, trenger man kun å implementere ServerEvent-klassen:
 
+```c++
+struct min_hendelse{
+    std::string melding;
+}
+
+class MinHendelse : public ServerEvent<sf::Vector2f> {
+public:
+    MinHendelse(const std::function<void(const sf::Vector2f &data, const server_response_actions<sf::Vector2f> &actions)> &callback): ServerEvent<sf::Vector2f>(callback){}
+
+    //OBS: her returneres det json, og ikke Packet
+    json serialize(const min_hendelse &hendelse) override {
+        nlohmann::json data{
+            {"melding", hendelse.melding},
+        };
+        return data;
+    }
+
+    // helt lik som klienten!
+    min_hendelse deserialize(const Packet &packet) override {
+        return {
+            packet.content["melding"]
+        };
+    }
+};
+```
+
+Denne nye hendelsen kan brukes slik:
+
+```c++
+server.add_event("move", MinHendelse([](const min_hendelse &data, const server_response_actions<min_hendelse> &actions){
+    ...
+}));
+```
 
 ### Reserverte hendelser
 Alle hendelser som starter med "!" er reservert.
 
-### Klient-server
+#### Klient-server:
 
 | Hendelse | Beskrivelse               | Pakkeinhold                      |
 |----------|---------------------------|----------------------------------|
@@ -181,8 +261,37 @@ Alle hendelser som starter med "!" er reservert.
 | !connect | Lager en brukersesjon     | void                             |
 
 
-### Server-klient
+#### Server-klient:
 | Hendelse | Beskrivelse     | Pakkeinhold      |
 |----------|-----------------|------------------|
 | !ping    | Ping-respons    | client_timestamp |
 | !connect | Connect-respons | connection_id    |
+
+## Videre arbeid
+Selv om biblioteket har mye funksjonalitet, er det fortsatt mye som kan forbedres. Under er et par utviklingsområder
+
+### Utvide hendelses-validering
+Når en klient sender en hendelse, sender den også med en hendelses-id. 
+Denne id-en lagres på klienten, slik at den senere kan validere den.
+Foreløpig er valideringen enkel, og sletter alle id-er som var før den om hendelsen ble akseptert, eller sletter alle om den ikke ble akseptert.
+Her er det rom for å gjør mer avansert validering, f.eks. om hendelsen var sendt fra en annen klient.
+
+### Sende samme hendelse fra to klienter
+Dette punktet utvider litt på det over. 
+At to klienter sender samme hendelse (f.eks. kontrollerer samme karakter), er utestet funksjonalitet.
+Når klienten mottar en hendelse den ikke forventer å motta, gjør den foreløpig ingenting nytt.
+
+
+### Ulike interpolasjons-typer
+Biblioteket bruker for øyeblikket kun "spring interpolation". Det kan være hensiktsmessig å legge til andre ulike typer interpolasjon, som f.eks linjær eller spline.
+
+### Relative hendelser
+En vesentlig egenskap med løsningen er det som jeg har valgt å kalle "eventPool".
+Like hendelser som sendes hyppig, samles, og kun *siste* blir faktisk sendt til serveren.
+Dette betyr at alle hendelser kun kan representere en *ny* tilstand, og kan ikke være relative, som f.eks "beveg deg 5 steg til høyre".
+En løsning her er enten å summere alle hendelsene (begrenser uvikler-implementasjon), eller å sende alle hendelsene i en stor liste (øker server-prosesseringstid).
+
+### Ikke-broadcast hendelser
+Når en hendelse enten aksepteres eller avslås av serveren, sendes den oppdaterte daten til *alle* klienter.
+Dette gjør at serveren kan godkjenne f.eks. deler av forespørselen, istedenfor å forkaste absoultt hele den motatte pakken.
+Desverre, fører dette til at hendelser som kun kan foregå mellom klient og tjener (f.eks. autentisering) ikke er mulig.
