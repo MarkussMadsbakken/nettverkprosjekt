@@ -6,21 +6,14 @@ set(CMAKE_CXX_STANDARD 23)
 add_executable(nettverkprosjekt main.cpp
         server/netServer.cpp
         client/netClient.cpp
-        models/packet.cpp
-        models/error.cpp
         models/error.h
         models/packet.h
-        server/connectionManager.cpp
-        server/connectionManager.cpp
         server/connectionManager.h
-        client/eventPool.cpp
         client/eventPool.h
-        client/event.cpp
         client/event.h
-        client/interpolation.cpp
         client/interpolation.h
-        server/eventProcessor.cpp
         server/eventProcessor.h
+        server/serverEvent.h
 )
 
 # SFML
